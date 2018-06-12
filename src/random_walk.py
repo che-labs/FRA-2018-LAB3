@@ -19,10 +19,6 @@ def hay_obstaculo(ranges):
         if not math.isnan(r) and r < target:
             return True
 
-    '''
-    return reduce((lambda x, y: (not math.isnan(x) and not math.isnan(y)) and (x < target and y < target)),
-                  ranges[250:450])
-    '''
     return False
 
 
