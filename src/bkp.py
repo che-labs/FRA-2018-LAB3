@@ -31,14 +31,10 @@ class ImageConverter:
         self.is_dumpster = False
         self.encontre_hydrant = False
         self.encontre_dumpster = False
-        self.avoid_target = 1.35
-        self.find_target = .65
-        self.min_target = 0.8
-        self.max_target = 1.5
+        self.avoid_target = 1.5
+        self.find_target = .8
         self.sense = 1
         self.is_center = False
-        self.tengo_obstaculo = False
-        self.hay_laterales = False
 
     def hay_obstaculo(self, ranges):
         for i, r in enumerate(ranges[270:440]):
@@ -51,37 +47,12 @@ class ImageConverter:
                 return True
         return False
 
-    def hay_obstaculo_laterales(self, ranges):
-
-        for i, r in enumerate(ranges[180:220]):
-            if not math.isnan(r) and r < self.min_target:
-                print('Laterales == 1')
-                return 1
-
-        for i, r in enumerate(ranges[500:540]):
-            if not math.isnan(r) and r < self.min_target:
-                print('Laterales == 2')
-                return 2
-
-        return 0
-
-    def hay_obstaculo_frente(self, ranges):
-        for i, r in enumerate(ranges[270:360]):
-            if not math.isnan(r) and r < self.max_target:
-                return 1
-
-        for i, r in enumerate(ranges[361:450]):
-            if not math.isnan(r) and r < self.max_target:
-                return 2
-
-        return 0
-
     def hay_objeto(self):
         if self.scan:
-            # print('Length: {}'.format(len(self.scan.ranges)))
-            for r in self.scan.ranges[320:400]:
+            print('Length: {}'.format(len(self.scan.ranges)))
+            for r in self.scan.ranges[340:380]:
                 if not math.isnan(r) and r < self.find_target:
-                    # print('Hay objeto a: {}'.format(r))
+                    print('Hay objeto a: {}'.format(r))
                     return True
 
         return False
@@ -98,24 +69,15 @@ class ImageConverter:
         while not rospy.is_shutdown():
 
             hay_obstacle = self.hay_obstaculo(self.scan.ranges)
-            if not self.hay_laterales == 0:
-                if self.hay_laterales == 1:
-                    self.vel_msg.linear.x = 0
-                    self.vel_msg.angular.z = -1
-                else:
-                    self.vel_msg.linear.x = 0
-                    self.vel_msg.angular.z = 1
 
-                self.velocity_pub.publish(self.vel_msg)
-
-            elif self.tengo_obstaculo and not ((self.is_hydrant or self.is_dumpster) and hay_obstacle):
-                print('HAY OBSTACULO , NO HAY OBJETO')
+            if self.hay_objeto() and not ((self.is_hydrant or self.is_dumpster) and self.is_center):
+                #print('HAY OBSTACULO , NO HAY OBJECTO')
                 # Tengo que girar porque choco con algo que no es el objetivo
                 self.vel_msg.linear.x = 0
                 self.vel_msg.angular.z = self.sense * 0.8  # rotation in radians/second
                 self.velocity_pub.publish(self.vel_msg)
             elif self.is_hydrant or self.is_dumpster:
-                print(' HAY OBJECTO')
+                print('NO HAY OBJECTO')
                 self.go_to_object()
             else:
                 #print('RANDOM WALK')
@@ -128,7 +90,7 @@ class ImageConverter:
     def go_to_object(self):
         self.vel_msg.linear.x = 0.6
         self.velocity_pub.publish(self.vel_msg)
-        print('Center: {} --- Hay Objeto: {}'.format(self.is_center, self.tengo_obstaculo))
+        print('Center: {} --- Hay Objeto: {}'.format(self.is_center, self.hay_objeto()))
         if self.hay_objeto():
             if self.is_hydrant:
                 rospy.loginfo('ENCONTRE HYDRANT! :-)')
@@ -151,7 +113,7 @@ class ImageConverter:
             wait = now + timedelta(seconds=seconds)
             while datetime.now().second < wait.second:
                 self.vel_msg.linear.x = 0
-                self.vel_msg.angular.z = 1
+                self.vel_msg.angular.z = sense * 1
                 self.velocity_pub.publish(self.vel_msg)
 
             '''
@@ -165,39 +127,35 @@ class ImageConverter:
         cv_image = {}
         hsv_img = {}
 
-        self.hay_laterales = self.hay_obstaculo_laterales(self.scan.ranges)
         try:
             cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
             hsv_img = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
         except CvBridgeError as e:
             print(e)
 
-        if self.hay_laterales == 0:
-            red_hydrant_lower = np.array([0, 50, 39], np.uint8)
-            red_hydrant_upper = np.array([5, 255, 255], np.uint8)
+        red_hydrant_lower = np.array([0, 50, 39], np.uint8)
+        red_hydrant_upper = np.array([5, 255, 255], np.uint8)
 
-            green_dumpster_lower = np.array([65, 0, 0], np.uint8)
-            green_dumpster_upper = np.array([75, 255, 255], np.uint8)
+        green_dumpster_lower = np.array([65, 0, 0], np.uint8)
+        green_dumpster_upper = np.array([75, 255, 255], np.uint8)
 
-            self.is_hydrant = False
-            self.is_dumpster = False
-            self.is_center = False
+        self.is_hydrant = False
+        self.is_dumpster = False
+        self.is_center = False
 
-            self.tengo_obstaculo = self.hay_obstaculo(self.scan.ranges)
+        if not self.encontre_hydrant:
+            self.find_hydrant(cv_image, hsv_img, red_hydrant_lower, red_hydrant_upper)
 
-            if not self.encontre_hydrant:
-                self.find_hydrant(cv_image, hsv_img, red_hydrant_lower, red_hydrant_upper)
+        if not self.is_hydrant and not self.encontre_dumpster:
+            self.find_dumpster(cv_image, hsv_img, green_dumpster_lower, green_dumpster_upper)
 
-            if not self.is_hydrant and not self.encontre_dumpster:
-                self.find_dumpster(cv_image, hsv_img, green_dumpster_lower, green_dumpster_upper)
-
-            '''
-            if not self.hay_objeto():
-                # find and draw hydrant contours
-                self.find_hydrant(cv_image, hsv_img, red_hydrant_lower, red_hydrant_upper)
-                # find and draw dumpster contours
-                self.find_dumpster(cv_image, hsv_img, green_dumpster_lower, green_dumpster_upper)
-            '''
+        '''
+        if not self.hay_objeto():
+            # find and draw hydrant contours
+            self.find_hydrant(cv_image, hsv_img, red_hydrant_lower, red_hydrant_upper)
+            # find and draw dumpster contours
+            self.find_dumpster(cv_image, hsv_img, green_dumpster_lower, green_dumpster_upper)
+        '''
 
         # draw contours in image window
         cv2.imshow("Show", cv_image)
@@ -220,7 +178,7 @@ class ImageConverter:
             x, y, w, h = cv2.boundingRect(c)
 
             # draw the contour rectangle
-            if w > 5 and h > 80:
+            if w > 5 and h > 40 and not self.hay_objeto():
                 if not self.is_dumpster:
                     self.is_hydrant = True
                 cv2.rectangle(cv_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
@@ -246,7 +204,7 @@ class ImageConverter:
             x, y, w, h = cv2.boundingRect(c)
 
             # draw the book contour rentangle
-            if w > 70 and h > 50:
+            if w > 70 and h > 50 and not self.hay_objeto():
                 if not self.is_hydrant:
                     self.is_dumpster = True
                 cv2.rectangle(cv_image, (x, y), (x+w, y+h), (51, 153, 255), 2)
@@ -258,14 +216,14 @@ class ImageConverter:
 
     def center_husky(self, x, y, w, h):
         #print('X: {} -- Y: {} -- W: {}'.format(x, y, w))
-        if self.is_hydrant or self.is_dumpster:
-            if (x+w/2) > 345:
+        if (self.is_hydrant or self.is_dumpster) and not self.hay_objeto():
+            if (x+w/2) > 355:
                 #rospy.loginfo("TURN RIGHT")
                 #print('X: {} -- Y: {}'.format(x, y))
                 self.turn += -0.1
                 if self.turn < -0.5:
                     self.turn = -0.5
-            elif (x+w/2) < 335:
+            elif (x+w/2) < 325:
                 #rospy.loginfo("TURN LEFT")
                 #print('X: {} -- Y: {}'.format(x, y))
                 self.turn += 0.1
